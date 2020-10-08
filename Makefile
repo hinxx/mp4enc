@@ -11,15 +11,15 @@ LDLIBS := $(shell pkg-config --libs $(FFMPEG_LIBS)) $(LDLIBS)
 CFLAGS := $(shell pkg-config --cflags x264) $(CFLAGS)
 LDLIBS := $(shell pkg-config --libs x264) $(LDLIBS)
 
+all: test1
+
 %.cpp: movie.h
 
 %.o: %.cpp
 	$(CXX) $(CFLAGS) -c $< -o $@
 
-all: test1
-
 test1: main.o writer.o
-	$(CXX) $? -o $@ $(LDLIBS)
+	$(CXX) $^ -o $@ $(LDLIBS)
 
 clean:
 	rm -f test1 *.o

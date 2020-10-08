@@ -1,8 +1,10 @@
 // Adapted from https://stackoverflow.com/questions/34511312/how-to-encode-a-video-from-several-images-generated-in-a-c-program-without-wri
+// Taken from https://github.com/apc-llc/moviemaker-cpp
+// Removed SVG and GTK stuff
+// Removed the reader part
 
 #include "movie.h"
 
-//#include <librsvg-2.0/librsvg/rsvg.h>
 #include <vector>
 #include <assert.h>
 
@@ -13,6 +15,7 @@ MovieWriter::MovieWriter(const string& filename_, const unsigned int width_, con
 width(width_), height(height_), iframe(0), pixels(4 * width * height)
 
 {
+
 	// Preparing to convert my generated RGB images to YUV frames.
 	swsCtx = sws_getContext(width, height,
 		AV_PIX_FMT_RGB24, width, height, AV_PIX_FMT_YUV420P, SWS_FAST_BILINEAR, NULL, NULL, NULL);
@@ -29,13 +32,32 @@ width(width_), height(height_), iframe(0), pixels(4 * width * height)
 	AVDictionary* opt = NULL;
 	av_dict_set(&opt, "preset", "slow", 0);
 	av_dict_set(&opt, "crf", "20", 0);
-	stream = avformat_new_stream(fc, codec);
-	c = stream->codec;
+    stream = avformat_new_stream(fc, NULL);
+    assert(stream != NULL);
+    c = avcodec_alloc_context3(codec);
+    c->codec_id = codec->id;
+    c->bit_rate = 400000;
+    /* Resolution must be a multiple of two. */
 	c->width = width;
 	c->height = height;
 	c->pix_fmt = AV_PIX_FMT_YUV420P;
+    /* timebase: This is the fundamental unit of time (in seconds) in terms
+     * of which frame timestamps are represented. For fixed-fps content,
+     * timebase should be 1/framerate and timestamp increments should be
+     * identical to 1. */
 	c->time_base = (AVRational){ 1, 25 };
-
+    /* emit one intra frame every twelve frames at most */
+    c->gop_size = 12;
+    if (c->codec_id == AV_CODEC_ID_MPEG2VIDEO) {
+        /* just for testing, we also add B-frames */
+        c->max_b_frames = 2;
+    }
+    if (c->codec_id == AV_CODEC_ID_MPEG1VIDEO) {
+        /* Needed to avoid using macroblocks in which some coeffs overflow.
+         * This does not happen with normal video, it just happens here as
+         * the motion of the chroma plane does not match the luma plane. */
+        c->mb_decision = 2;
+    }
 	// Setting up the format, its stream(s),
 	// linking with the codec(s) and write the header.
 	if (fc->oformat->flags & AVFMT_GLOBALHEADER)
@@ -43,15 +65,23 @@ width(width_), height(height_), iframe(0), pixels(4 * width * height)
 		// Some formats require a global header.
 		c->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 	}
-	avcodec_open2(c, codec, &opt);
+
+    int ret;
+	ret = avcodec_open2(c, codec, &opt);
+    assert(ret == 0);
 	av_dict_free(&opt);
+
+    ret = avcodec_parameters_from_context(stream->codecpar, c);
+    assert(ret == 0);
 
 	// Once the codec is set up, we need to let the container know
 	// which codec are the streams using, in this case the only (video) stream.
 	stream->time_base = (AVRational){ 1, 25 };
 	av_dump_format(fc, 0, filename.c_str(), 1);
-	avio_open(&fc->pb, filename.c_str(), AVIO_FLAG_WRITE);
-	int ret = avformat_write_header(fc, &opt);
+
+    ret = avio_open(&fc->pb, filename.c_str(), AVIO_FLAG_WRITE);
+    assert(ret == 0);
+	ret = avformat_write_header(fc, &opt);
     assert(ret == 0);
 	av_dict_free(&opt); 
 
@@ -62,6 +92,7 @@ width(width_), height(height_), iframe(0), pixels(4 * width * height)
 	rgbpic->width = width;
 	rgbpic->height = height;
 	ret = av_frame_get_buffer(rgbpic, 1);
+    assert(ret == 0);
 
 	// Allocating memory for each conversion output YUV frame.
 	yuvpic = av_frame_alloc();
@@ -69,6 +100,7 @@ width(width_), height(height_), iframe(0), pixels(4 * width * height)
 	yuvpic->width = width;
 	yuvpic->height = height;
 	ret = av_frame_get_buffer(yuvpic, 1);
+    assert(ret == 0);
 
 	// After the format, code and general frame data is set,
 	// we can write the video in the frame generation loop:
@@ -144,9 +176,46 @@ void MovieWriter::addFrame(const uint8_t* pixels)
 
 	// Not actually scaling anything, but just converting
 	// the RGB data to YUV and store it in yuvpic.
-	sws_scale(swsCtx, rgbpic->data, rgbpic->linesize, 0,
+	int ret = sws_scale(swsCtx, rgbpic->data, rgbpic->linesize, 0,
 		height, yuvpic->data, yuvpic->linesize);
+    assert(ret != 0);
 
+#if 0
+    // send the frame to the encoder
+    ret = avcodec_send_frame(c, frame);
+    if (ret < 0) {
+        fprintf(stderr, "Error sending a frame to the encoder: %s\n",
+                av_err2str(ret));
+        exit(1);
+    }
+
+    while (ret >= 0) {
+        AVPacket pkt = { 0 };
+
+        ret = avcodec_receive_packet(c, &pkt);
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+            break;
+        else if (ret < 0) {
+            fprintf(stderr, "Error encoding a frame: %s\n", av_err2str(ret));
+            exit(1);
+        }
+
+        /* rescale output packet timestamp values from codec to stream timebase */
+        av_packet_rescale_ts(&pkt, c->time_base, st->time_base);
+        pkt.stream_index = st->index;
+
+        /* Write the compressed frame to the media file. */
+        log_packet(fmt_ctx, &pkt);
+        ret = av_interleaved_write_frame(fmt_ctx, &pkt);
+        av_packet_unref(&pkt);
+        if (ret < 0) {
+            fprintf(stderr, "Error while writing output packet: %s\n", av_err2str(ret));
+            exit(1);
+        }
+    }
+
+//    return ret == AVERROR_EOF ? 1 : 0;
+#else
 	av_init_packet(&pkt);
 	pkt.data = NULL;
 	pkt.size = 0;
@@ -157,7 +226,7 @@ void MovieWriter::addFrame(const uint8_t* pixels)
 	yuvpic->pts = iframe;
 
 	int got_output;
-	int ret = avcodec_encode_video2(c, &pkt, yuvpic, &got_output);
+	ret = avcodec_encode_video2(c, &pkt, yuvpic, &got_output);
 	if (got_output)
 	{
 		fflush(stdout);
@@ -173,6 +242,7 @@ void MovieWriter::addFrame(const uint8_t* pixels)
 		av_interleaved_write_frame(fc, &pkt);
 		av_packet_unref(&pkt);
 	}
+#endif
 }
 
 MovieWriter::~MovieWriter()
