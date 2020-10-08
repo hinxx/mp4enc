@@ -180,99 +180,87 @@ void MovieWriter::addFrame(const uint8_t* pixels)
 		height, yuvpic->data, yuvpic->linesize);
     assert(ret != 0);
 
-#if 0
-    // send the frame to the encoder
-    ret = avcodec_send_frame(c, frame);
-    if (ret < 0) {
-        fprintf(stderr, "Error sending a frame to the encoder: %s\n",
-                av_err2str(ret));
-        exit(1);
-    }
-
-    while (ret >= 0) {
-        AVPacket pkt = { 0 };
-
-        ret = avcodec_receive_packet(c, &pkt);
-        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-            break;
-        else if (ret < 0) {
-            fprintf(stderr, "Error encoding a frame: %s\n", av_err2str(ret));
-            exit(1);
-        }
-
-        /* rescale output packet timestamp values from codec to stream timebase */
-        av_packet_rescale_ts(&pkt, c->time_base, st->time_base);
-        pkt.stream_index = st->index;
-
-        /* Write the compressed frame to the media file. */
-        log_packet(fmt_ctx, &pkt);
-        ret = av_interleaved_write_frame(fmt_ctx, &pkt);
-        av_packet_unref(&pkt);
-        if (ret < 0) {
-            fprintf(stderr, "Error while writing output packet: %s\n", av_err2str(ret));
-            exit(1);
-        }
-    }
-
-//    return ret == AVERROR_EOF ? 1 : 0;
-#else
-	av_init_packet(&pkt);
-	pkt.data = NULL;
-	pkt.size = 0;
-
-	// The PTS of the frame are just in a reference unit,
+    // The PTS of the frame are just in a reference unit,
 	// unrelated to the format we are using. We set them,
 	// for instance, as the corresponding frame number.
 	yuvpic->pts = iframe;
 
-	int got_output;
-	ret = avcodec_encode_video2(c, &pkt, yuvpic, &got_output);
-	if (got_output)
-	{
-		fflush(stdout);
+    writeFrame(yuvpic);
+}
 
-		// We set the packet PTS and DTS taking in the account our FPS (second argument),
+void MovieWriter::writeFrame(AVFrame *_frame) {
+    int ret;
+
+    // send the frame to the encoder
+    ret = avcodec_send_frame(c, _frame);
+    assert(ret >= 0);
+//    if (ret < 0) {
+//        fprintf(stderr, "Error sending a frame to the encoder: %s\n",
+//                av_err2str(ret));
+//        exit(1);
+//    }
+
+    while (ret >= 0) {
+        fflush(stdout);
+
+        //AVPacket pkt = { 0 };
+        AVPacket pkt;
+        av_init_packet(&pkt);
+        // packet data will be allocated by the encoder
+        pkt.data = NULL;
+        pkt.size = 0;
+
+        ret = avcodec_receive_packet(c, &pkt);
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+            break;
+        }
+//        else if (ret < 0) {
+//            fprintf(stderr, "Error encoding a frame: %s\n", av_err2str(ret));
+//            exit(1);
+//        }
+        assert(ret >= 0);
+
+        /* rescale output packet timestamp values from codec to stream timebase */
+        // We set the packet PTS and DTS taking in the account our FPS (second argument),
 		// and the time base that our selected format uses (third argument).
 		av_packet_rescale_ts(&pkt, (AVRational){ 1, 25 }, stream->time_base);
-
-		pkt.stream_index = stream->index;
+        pkt.stream_index = stream->index;
 		printf("Writing frame %d (size = %d)\n", iframe++, pkt.size);
 
-		// Write the encoded frame to the mp4 file.
-		av_interleaved_write_frame(fc, &pkt);
+        /* Write the compressed frame to the media file. */
+        // Write the encoded frame to the mp4 file.
+		ret = av_interleaved_write_frame(fc, &pkt);
+        assert(ret == 0);
 		av_packet_unref(&pkt);
-	}
-#endif
+//        if (ret < 0) {
+//            fprintf(stderr, "Error while writing output packet: %s\n", av_err2str(ret));
+//            exit(1);
+//        }
+    }
+
+//    return ret == AVERROR_EOF ? 1 : 0;
 }
 
 MovieWriter::~MovieWriter()
-{	
+{
 	// Writing the delayed frames:
-	for (int got_output = 1; got_output; )
-	{
-		int ret = avcodec_encode_video2(c, &pkt, NULL, &got_output);
-		if (got_output)
-		{
-			fflush(stdout);
-			av_packet_rescale_ts(&pkt, (AVRational){ 1, 25 }, stream->time_base);
-			pkt.stream_index = stream->index;
-			printf("Writing frame %d (size = %d)\n", iframe++, pkt.size);
-			av_interleaved_write_frame(fc, &pkt);
-			av_packet_unref(&pkt);
-		}
-	}
-	
+    // flush the rest of the encoded frames, if any
+    writeFrame(NULL);
+
 	// Writing the end of the file.
 	av_write_trailer(fc);
 
+    avcodec_free_context(&c);
+
 	// Closing the file.
-	if (!(fmt->flags & AVFMT_NOFILE))
-	    avio_closep(&fc->pb);
-	avcodec_close(stream->codec);
+    if (!(fmt->flags & AVFMT_NOFILE)) {
+        avio_closep(&fc->pb);
+    }
 
 	// Freeing all the allocated memory:
 	sws_freeContext(swsCtx);
 	av_frame_free(&rgbpic);
 	av_frame_free(&yuvpic);
+
 	avformat_free_context(fc);
 }

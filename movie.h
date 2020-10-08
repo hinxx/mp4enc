@@ -43,7 +43,9 @@ public :
 //	void addFrame(const std::string& filename);
 
 	void addFrame(const uint8_t* pixels);
-	
+
+    void writeFrame(AVFrame *_frame);
+
 	~MovieWriter();
 };
 
