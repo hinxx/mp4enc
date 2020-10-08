@@ -1,3 +1,4 @@
+.gitignore
 Makefile
 main.cpp
 movie.h

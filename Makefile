@@ -14,12 +14,12 @@ LDLIBS := $(shell pkg-config --libs x264) $(LDLIBS)
 %.cpp: movie.h
 
 %.o: %.cpp
-	g++ $(CFLAGS) -c $< -o $@
+	$(CXX) $(CFLAGS) -c $< -o $@
 
 all: test1
 
 test1: main.o writer.o
-	g++ $? -o $@ $(LDLIBS)
+	$(CXX) $? -o $@ $(LDLIBS)
 
 clean:
 	rm -f test1 *.o

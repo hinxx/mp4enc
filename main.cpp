@@ -5,8 +5,11 @@
 #include <vector>
 
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
+
+    // Loads the whole database of available codecs and formats.
+    av_register_all();
+
     const unsigned int width = 1024;
     const unsigned int height = 768;
     const unsigned int nframes = 128;

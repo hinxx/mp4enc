@@ -1,9 +1,11 @@
 // Adapted from https://stackoverflow.com/questions/34511312/how-to-encode-a-video-from-several-images-generated-in-a-c-program-without-wri
+// Taken from https://github.com/apc-llc/moviemaker-cpp
+// Removed SVG and GTK stuff
+// Removed the reader part
 
 #ifndef MOVIE_H
 #define MOVIE_H
 
-//#include <cairo/cairo.h>
 #include <stdint.h>
 #include <string>
 #include <vector>
@@ -34,8 +36,6 @@ class MovieWriter
 
 	std::vector<uint8_t> pixels;
 
-//	cairo_surface_t* cairo_surface;
-
 public :
 
 	MovieWriter(const std::string& filename, const unsigned int width, const unsigned int height);
@@ -46,30 +46,6 @@ public :
 	
 	~MovieWriter();
 };
-
-//class MovieReader
-//{
-//	const unsigned int width, height;
-
-//	SwsContext* swsCtx;
-//	AVOutputFormat* fmt;
-//	AVStream* stream;
-//	AVFormatContext* fc;
-//	AVCodecContext* c;
-//	AVFrame* pFrame;
-//	AVFrame* pFrameRGB;
-
-//	// The index of video stream.
-//	int ivstream;
-
-//public :
-
-//	MovieReader(const std::string& filename, const unsigned int width, const unsigned int height);
-
-//	bool getFrame(std::vector<uint8_t>& pixels);
-
-//	~MovieReader();
-//};
 
 #endif // MOVIE_H
 

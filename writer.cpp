@@ -4,32 +4,15 @@
 
 //#include <librsvg-2.0/librsvg/rsvg.h>
 #include <vector>
+#include <assert.h>
 
 using namespace std;
-
-// One-time initialization.
-class FFmpegInitialize
-{
-public :
-
-	FFmpegInitialize()
-	{
-		// Loads the whole database of available codecs and formats.
-		av_register_all();
-	}
-};
-
-static FFmpegInitialize ffmpegInitialize;
 
 MovieWriter::MovieWriter(const string& filename_, const unsigned int width_, const unsigned int height_) :
 	
 width(width_), height(height_), iframe(0), pixels(4 * width * height)
 
 {
-//	cairo_surface = cairo_image_surface_create_for_data(
-//		(unsigned char*)&pixels[0], CAIRO_FORMAT_RGB24, width, height,
-//		cairo_format_stride_for_width(CAIRO_FORMAT_RGB24, width));
-
 	// Preparing to convert my generated RGB images to YUV frames.
 	swsCtx = sws_getContext(width, height,
 		AV_PIX_FMT_RGB24, width, height, AV_PIX_FMT_YUV420P, SWS_FAST_BILINEAR, NULL, NULL, NULL);
@@ -69,6 +52,7 @@ width(width_), height(height_), iframe(0), pixels(4 * width * height)
 	av_dump_format(fc, 0, filename.c_str(), 1);
 	avio_open(&fc->pb, filename.c_str(), AVIO_FLAG_WRITE);
 	int ret = avformat_write_header(fc, &opt);
+    assert(ret == 0);
 	av_dict_free(&opt); 
 
 	// Preparing the containers of the frame data:
@@ -221,7 +205,4 @@ MovieWriter::~MovieWriter()
 	av_frame_free(&rgbpic);
 	av_frame_free(&yuvpic);
 	avformat_free_context(fc);
-
-//	cairo_surface_destroy(cairo_surface);
 }
-
